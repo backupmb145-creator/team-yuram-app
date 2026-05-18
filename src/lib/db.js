@@ -100,13 +100,29 @@ export async function deleteTraining(id) {
 
 // ── External Tournaments ───────────────────────────────────────────────────
 
+function dbToExternal(row) {
+  return {
+    id:           row.id,
+    name:         row.name,
+    date:         row.date,
+    location:     row.location ?? '',
+    // participants stockés dans la colonne "members" (JSONB)
+    participants: row.members ?? [],
+    // results stockés en JSON string dans la colonne TEXT "results"
+    results: (() => {
+      try { return typeof row.results === 'string' ? JSON.parse(row.results || '[]') : (row.results ?? []) }
+      catch { return [] }
+    })(),
+  }
+}
+
 export async function getExternalTournaments() {
   const { data, error } = await supabase
     .from('external_tournaments')
     .select('*')
     .order('date', { ascending: true })
   if (error) throw error
-  return data ?? []
+  return (data ?? []).map(dbToExternal)
 }
 
 export async function saveExternalTournament(t) {
@@ -117,9 +133,9 @@ export async function saveExternalTournament(t) {
       name:     t.name,
       date:     t.date,
       location: t.location ?? '',
-      members:  t.members  ?? [],
-      decks:    t.decks    ?? {},
-      results:  t.results  ?? '',
+      members:  t.participants ?? [],          // participants → colonne members (JSONB)
+      decks:    {},                             // inutilisé (decks dans participants)
+      results:  JSON.stringify(t.results ?? []), // array → JSON string (colonne TEXT)
     })
   if (error) throw error
 }
