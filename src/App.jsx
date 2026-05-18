@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AuthProvider } from './contexts/AuthContext'
+import { ToastProvider } from './contexts/ToastContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import NewTournament from './pages/NewTournament'
@@ -8,7 +9,7 @@ import SeasonRanking from './pages/SeasonRanking'
 import Trainings from './pages/Trainings'
 import History from './pages/History'
 import ExternalTournaments from './pages/ExternalTournaments'
-import { getTournament, saveTournament, saveHistory } from './utils/storage'
+import { isSeeded, saveTournament, saveHistory } from './lib/db'
 import { SEED_TOURNAMENT, SEED_HISTORY } from './data/seed'
 
 function AppInner() {
@@ -16,13 +17,12 @@ function AppInner() {
   const [selectedId, setSelectedId] = useState(null)
 
   useEffect(() => {
-    if (!localStorage.getItem('yuram_seeded')) {
-      if (!getTournament(SEED_TOURNAMENT.id)) {
-        saveTournament(SEED_TOURNAMENT)
+    isSeeded().then(seeded => {
+      if (!seeded) {
+        saveTournament(SEED_TOURNAMENT).catch(() => {})
+        saveHistory(SEED_HISTORY).catch(() => {})
       }
-      saveHistory(SEED_HISTORY)
-      localStorage.setItem('yuram_seeded', '1')
-    }
+    }).catch(() => {})
   }, [])
 
   function navigate(to, params = {}) {
@@ -46,7 +46,9 @@ function AppInner() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppInner />
+      <ToastProvider>
+        <AppInner />
+      </ToastProvider>
     </AuthProvider>
   )
 }

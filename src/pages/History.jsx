@@ -1,23 +1,27 @@
 import { useState, useEffect } from 'react'
-import { getHistory, saveHistory } from '../utils/storage'
-import { SEED_HISTORY } from '../data/seed'
+import { getHistory, saveHistoryYear } from '../lib/db'
 import { MEMBERS } from '../data/constants'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 
 export default function History() {
   const { isAdmin } = useAuth()
+  const toast = useToast()
   const [history, setHistory] = useState({})
   const [editingYear, setEditingYear] = useState(null)
 
   useEffect(() => {
-    setHistory(getHistory(SEED_HISTORY))
+    getHistory().then(setHistory).catch(() => toast('Impossible de charger l\'historique'))
   }, [])
 
-  function handleSave(year, data) {
-    const updated = { ...history, [year]: data }
-    saveHistory(updated)
-    setHistory(updated)
-    setEditingYear(null)
+  async function handleSave(year, data) {
+    try {
+      await saveHistoryYear(year, data)
+      setHistory(h => ({ ...h, [year]: data }))
+      setEditingYear(null)
+    } catch {
+      toast('Erreur lors de la sauvegarde')
+    }
   }
 
   const years = Object.keys(history).sort((a, b) => b - a)

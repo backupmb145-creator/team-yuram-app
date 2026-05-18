@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { getTournaments, deleteTournament } from '../utils/storage'
+import { getTournaments, deleteTournament } from '../lib/db'
 import { computeSeasonRanking } from '../utils/scoring'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
+import { supabase } from '../lib/supabase'
 import { CURRENT_YEAR } from '../data/constants'
 
 const STATUS_MAP = {
@@ -15,23 +17,43 @@ const STATUS_MAP = {
 
 export default function Dashboard({ navigate }) {
   const { isAdmin } = useAuth()
+  const toast = useToast()
   const [tournaments, setTournaments] = useState([])
   const [topRanking, setTopRanking] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  function refresh() {
-    const list = getTournaments().sort((a, b) => b.date.localeCompare(a.date))
-    setTournaments(list)
-    const ranking = computeSeasonRanking(list.filter(t => t.date.startsWith(String(CURRENT_YEAR))))
-    setTopRanking(ranking.slice(0, 3))
+  async function refresh() {
+    try {
+      const list = await getTournaments()
+      setTournaments(list)
+      const ranking = computeSeasonRanking(list.filter(t => t.date.startsWith(String(CURRENT_YEAR))))
+      setTopRanking(ranking.slice(0, 3))
+    } catch {
+      toast('Impossible de charger les tournois')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { refresh() }, [])
-
-  function handleDelete(id) {
-    deleteTournament(id)
-    setConfirmDelete(null)
+  useEffect(() => {
     refresh()
+    // Realtime : refresh quand un tournoi change
+    const sub = supabase
+      .channel('dashboard-tournaments')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, refresh)
+      .subscribe()
+    return () => supabase.removeChannel(sub)
+  }, [])
+
+  async function handleDelete(id) {
+    try {
+      await deleteTournament(id)
+      setConfirmDelete(null)
+      refresh()
+    } catch {
+      toast('Erreur lors de la suppression')
+    }
   }
 
   const active = tournaments.filter(t => t.status !== 'completed' && t.status !== 'locked')
@@ -86,7 +108,14 @@ export default function Dashboard({ navigate }) {
         </section>
       )}
 
-      {tournaments.length === 0 && (
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '64px 16px', color: 'var(--text-secondary)' }}>
+          <div style={{ fontSize: '32px', marginBottom: '12px', animation: 'titleGlow 1.5s ease infinite' }}>⚔️</div>
+          <p style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '14px' }}>Chargement…</p>
+        </div>
+      )}
+
+      {!loading && tournaments.length === 0 && (
         <div style={{ textAlign: 'center', padding: '64px 16px', color: 'var(--text-secondary)' }}>
           <div style={{ fontSize: '52px', marginBottom: '16px' }}>⚔️</div>
           <p style={{ fontFamily: 'Cinzel, serif', fontWeight: 600, color: 'var(--text-primary)', fontSize: '16px' }}>Aucun tournoi créé</p>

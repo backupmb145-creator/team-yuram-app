@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { MEMBERS } from '../data/constants'
-import { saveTournament, generateId } from '../utils/storage'
+import { saveTournament, generateId } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 
 export default function NewTournament({ navigate }) {
   const { isAdmin } = useAuth()
@@ -26,7 +27,9 @@ export default function NewTournament({ navigate }) {
   const [selectedPlayers, setSelectedPlayers] = useState([...MEMBERS])
   const [customPlayer, setCustomPlayer] = useState('')
   const [extraPlayers, setExtraPlayers] = useState([])
+  const toast = useToast()
   const [errors, setErrors] = useState({})
+  const [saving, setSaving] = useState(false)
 
   function togglePlayer(name) {
     setSelectedPlayers(prev =>
@@ -53,10 +56,10 @@ export default function NewTournament({ navigate }) {
     return e
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const e = validate()
     if (Object.keys(e).length) { setErrors(e); return }
-
+    setSaving(true)
     const tournament = {
       id: generateId(),
       date: form.date,
@@ -69,8 +72,13 @@ export default function NewTournament({ navigate }) {
       swissRounds: [],
       playoffs: null,
     }
-    saveTournament(tournament)
-    navigate('tournament', { id: tournament.id })
+    try {
+      await saveTournament(tournament)
+      navigate('tournament', { id: tournament.id })
+    } catch {
+      toast('Erreur lors de la création du tournoi')
+      setSaving(false)
+    }
   }
 
   const allMembers = [...MEMBERS, ...extraPlayers]
@@ -187,8 +195,8 @@ export default function NewTournament({ navigate }) {
         )}
       </div>
 
-      <button onClick={handleSubmit} className="btn-primary w-full py-3 text-base">
-        Créer le tournoi
+      <button onClick={handleSubmit} disabled={saving} className="btn-primary w-full py-3 text-base disabled:opacity-50">
+        {saving ? 'Création…' : 'Créer le tournoi'}
       </button>
     </div>
   )

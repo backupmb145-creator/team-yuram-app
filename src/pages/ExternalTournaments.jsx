@@ -1,36 +1,59 @@
 import { useState, useEffect } from 'react'
-import { getExternalTournaments, saveExternalTournament, deleteExternalTournament, generateId } from '../utils/storage'
+import { getExternalTournaments, saveExternalTournament, deleteExternalTournament, generateId } from '../lib/db'
 import { MEMBERS } from '../data/constants'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
+import { supabase } from '../lib/supabase'
 
 export default function ExternalTournaments() {
   const { isAdmin } = useAuth()
+  const toast = useToast()
   const [tournaments, setTournaments] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
 
-  function refresh() {
-    setTournaments(getExternalTournaments().sort((a, b) => a.date.localeCompare(b.date)))
+  async function refresh() {
+    try {
+      const list = await getExternalTournaments()
+      setTournaments(list.sort((a, b) => a.date.localeCompare(b.date)))
+    } catch {
+      toast('Impossible de charger les tournois externes')
+    }
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    const sub = supabase
+      .channel('external-tournaments')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'external_tournaments' }, refresh)
+      .subscribe()
+    return () => supabase.removeChannel(sub)
+  }, [])
 
   const today = new Date().toISOString().slice(0, 10)
   const upcoming = tournaments.filter(t => t.date >= today)
   const past = [...tournaments.filter(t => t.date < today)].reverse()
 
-  function handleSave(data) {
-    saveExternalTournament(data)
-    refresh()
-    setShowForm(false)
-    setEditingId(null)
+  async function handleSave(data) {
+    try {
+      await saveExternalTournament(data)
+      refresh()
+      setShowForm(false)
+      setEditingId(null)
+    } catch {
+      toast('Erreur lors de la sauvegarde')
+    }
   }
 
-  function handleDelete(id) {
-    deleteExternalTournament(id)
-    setConfirmDelete(null)
-    refresh()
+  async function handleDelete(id) {
+    try {
+      await deleteExternalTournament(id)
+      setConfirmDelete(null)
+      refresh()
+    } catch {
+      toast('Erreur lors de la suppression')
+    }
   }
 
   const editing = editingId ? tournaments.find(t => t.id === editingId) : null

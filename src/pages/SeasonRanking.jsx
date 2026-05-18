@@ -1,17 +1,33 @@
 import { useState, useEffect } from 'react'
-import { getTournaments } from '../utils/storage'
+import { getTournaments } from '../lib/db'
 import { computeSeasonRanking, getTournamentPlacements } from '../utils/scoring'
+import { useToast } from '../contexts/ToastContext'
+import { supabase } from '../lib/supabase'
 import { CURRENT_YEAR } from '../data/constants'
 
 export default function SeasonRanking() {
+  const toast = useToast()
   const [tournaments, setTournaments] = useState([])
   const [ranking, setRanking] = useState([])
 
+  async function refresh() {
+    try {
+      const all = await getTournaments()
+      const yearTournaments = all.filter(t => t.date.startsWith(String(CURRENT_YEAR)))
+      setTournaments(yearTournaments)
+      setRanking(computeSeasonRanking(yearTournaments))
+    } catch {
+      toast('Impossible de charger le classement')
+    }
+  }
+
   useEffect(() => {
-    const all = getTournaments()
-    const yearTournaments = all.filter(t => t.date.startsWith(String(CURRENT_YEAR)))
-    setTournaments(yearTournaments)
-    setRanking(computeSeasonRanking(yearTournaments))
+    refresh()
+    const sub = supabase
+      .channel('season-ranking')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, refresh)
+      .subscribe()
+    return () => supabase.removeChannel(sub)
   }, [])
 
   const completed = tournaments.filter(t => t.status === 'completed')

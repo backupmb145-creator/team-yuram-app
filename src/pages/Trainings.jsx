@@ -1,30 +1,55 @@
 import { useState, useEffect } from 'react'
-import { getTrainings, saveTraining, deleteTraining, generateId } from '../utils/storage'
+import { getTrainings, saveTraining, deleteTraining, generateId } from '../lib/db'
 import { MEMBERS } from '../data/constants'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
+import { supabase } from '../lib/supabase'
 
 export default function Trainings() {
   const { isAdmin } = useAuth()
+  const toast = useToast()
   const [trainings, setTrainings] = useState([])
   const [showForm, setShowForm] = useState(false)
+  const [editingTraining, setEditingTraining] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
 
-  function refresh() {
-    setTrainings(getTrainings().sort((a, b) => b.date.localeCompare(a.date)))
+  async function refresh() {
+    try {
+      const list = await getTrainings()
+      setTrainings(list.sort((a, b) => b.date.localeCompare(a.date)))
+    } catch {
+      toast('Impossible de charger les entraînements')
+    }
   }
 
-  useEffect(() => { refresh() }, [])
-
-  function handleSave(training) {
-    saveTraining(training)
+  useEffect(() => {
     refresh()
-    setShowForm(false)
+    const sub = supabase
+      .channel('trainings-list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trainings' }, refresh)
+      .subscribe()
+    return () => supabase.removeChannel(sub)
+  }, [])
+
+  async function handleSave(training) {
+    try {
+      await saveTraining(training)
+      refresh()
+      setShowForm(false)
+      setEditingTraining(null)
+    } catch {
+      toast('Erreur lors de la sauvegarde')
+    }
   }
 
-  function handleDelete(id) {
-    deleteTraining(id)
-    setConfirmDelete(null)
-    refresh()
+  async function handleDelete(id) {
+    try {
+      await deleteTraining(id)
+      setConfirmDelete(null)
+      refresh()
+    } catch {
+      toast('Erreur lors de la suppression')
+    }
   }
 
   // Compute quarterly stats
@@ -72,6 +97,7 @@ export default function Trainings() {
                 key={t.id}
                 training={t}
                 isAdmin={isAdmin}
+                onEdit={() => setEditingTraining(t)}
                 onDelete={() => setConfirmDelete(t.id)}
               />
             ))}
@@ -84,6 +110,15 @@ export default function Trainings() {
         <TrainingForm
           onSave={handleSave}
           onClose={() => setShowForm(false)}
+        />
+      )}
+
+      {/* Edit form modal */}
+      {editingTraining && (
+        <TrainingForm
+          training={editingTraining}
+          onSave={handleSave}
+          onClose={() => setEditingTraining(null)}
         />
       )}
 
@@ -103,7 +138,7 @@ export default function Trainings() {
   )
 }
 
-function TrainingCard({ training, onDelete, isAdmin }) {
+function TrainingCard({ training, onDelete, onEdit, isAdmin }) {
   return (
     <div className="card p-3 flex items-center justify-between gap-3">
       <div className="flex-1 min-w-0">
@@ -116,22 +151,33 @@ function TrainingCard({ training, onDelete, isAdmin }) {
         )}
       </div>
       {isAdmin && (
-        <button
-          onClick={onDelete}
-          className="text-slate-600 hover:text-red-400 transition-colors text-lg flex-shrink-0"
-        >
-          ×
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          <button
+            onClick={onEdit}
+            className="text-slate-500 hover:text-yellow-400 transition-colors text-sm px-1.5 py-0.5"
+            title="Modifier"
+          >
+            ✎
+          </button>
+          <button
+            onClick={onDelete}
+            className="text-slate-600 hover:text-red-400 transition-colors text-lg px-1"
+            title="Supprimer"
+          >
+            ×
+          </button>
+        </div>
       )}
     </div>
   )
 }
 
-function TrainingForm({ onSave, onClose }) {
+function TrainingForm({ onSave, onClose, training = null }) {
+  const isEdit = training !== null
   const today = new Date().toISOString().slice(0, 10)
-  const [date, setDate] = useState(today)
-  const [present, setPresent] = useState([])
-  const [note, setNote] = useState('')
+  const [date, setDate] = useState(isEdit ? training.date : today)
+  const [present, setPresent] = useState(isEdit ? training.present : [])
+  const [note, setNote] = useState(isEdit ? training.note ?? '' : '')
 
   function toggle(name) {
     setPresent(p => p.includes(name) ? p.filter(n => n !== name) : [...p, name])
@@ -139,13 +185,13 @@ function TrainingForm({ onSave, onClose }) {
 
   function handleSubmit() {
     if (!date || present.length === 0) return
-    onSave({ id: generateId(), date, present, note: note.trim() })
+    onSave({ id: isEdit ? training.id : generateId(), date, present, note: note.trim() })
   }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-4">
       <div className="card w-full max-w-sm space-y-4 p-5 max-h-[90vh] overflow-y-auto">
-        <h2 className="font-black text-lg text-yellow-400">Nouvelle séance</h2>
+        <h2 className="font-black text-lg text-yellow-400">{isEdit ? 'Modifier la séance' : 'Nouvelle séance'}</h2>
 
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-1">Date</label>
@@ -196,7 +242,7 @@ function TrainingForm({ onSave, onClose }) {
             disabled={!date || present.length === 0}
             className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Enregistrer
+            {isEdit ? 'Sauvegarder' : 'Enregistrer'}
           </button>
         </div>
       </div>

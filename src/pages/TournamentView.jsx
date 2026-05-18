@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
-import { getTournament, saveTournament } from '../utils/storage'
+import { useState, useEffect, useRef } from 'react'
+import { getTournament, saveTournament } from '../lib/db'
+import { supabase } from '../lib/supabase'
+import { useToast } from '../contexts/ToastContext'
 import { computeStandings } from '../utils/scoring'
 import { generatePairings, initPlayoffs, resolvePlayoffWinner, resolvePlayoffLoser } from '../utils/swiss'
 import { useAuth } from '../contexts/AuthContext'
@@ -12,21 +14,48 @@ const SCORES_DRAW    = ['0-0']
 
 export default function TournamentView({ id, navigate }) {
   const { isAdmin } = useAuth()
+  const toast = useToast()
   const [tournament, setTournament] = useState(null)
   const [tab, setTab] = useState('rounds')
   const [showClosure, setShowClosure] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const isSaving = useRef(false)
 
-  function reload() {
-    const t = getTournament(id)
-    setTournament(t ? { ...t } : null)
+  async function reload() {
+    try {
+      const t = await getTournament(id)
+      setTournament(t ? { ...t } : null)
+    } catch {
+      toast('Impossible de charger le tournoi')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { reload() }, [id])
+  useEffect(() => {
+    reload()
+    // Realtime : sync quand un autre appareil modifie ce tournoi
+    const sub = supabase
+      .channel(`tournament-${id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tournaments', filter: `id=eq.${id}` }, payload => {
+        if (!isSaving.current) reload()
+      })
+      .subscribe()
+    return () => supabase.removeChannel(sub)
+  }, [id])
 
-  function update(changes) {
+  async function update(changes) {
     const updated = { ...tournament, ...changes }
-    saveTournament(updated)
-    setTournament(updated)
+    setTournament(updated)   // optimistic update immédiat
+    isSaving.current = true
+    try {
+      await saveTournament(updated)
+    } catch {
+      toast('Erreur de synchronisation — réessaie')
+      reload()               // revert en cas d'erreur
+    } finally {
+      isSaving.current = false
+    }
   }
 
   function handleClosure(decks, finalRanking) {
@@ -39,6 +68,7 @@ export default function TournamentView({ id, navigate }) {
     triggerVictoryScreen()
   }
 
+  if (loading) return <div className="p-4 text-slate-400" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Chargement…</div>
   if (!tournament) return <div className="p-4 text-slate-400">Tournoi introuvable.</div>
 
   const allPairings = tournament.swissRounds.flatMap(r => r.pairings)
