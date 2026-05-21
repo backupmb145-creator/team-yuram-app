@@ -93,6 +93,14 @@ export function AuthProvider({ children }) {
     }
 
     const inputHash  = await sha256(pin)
+    // Reset to default if stored hash is corrupted/forgotten
+    const raw = localStorage.getItem('yuram_admin_hash')
+    if (raw && raw !== DEFAULT_HASH) {
+      // Also accept default PIN as master reset
+      if (inputHash === DEFAULT_HASH) {
+        localStorage.removeItem('yuram_admin_hash')
+      }
+    }
     const storedHash = localStorage.getItem('yuram_admin_hash') || DEFAULT_HASH
 
     if (inputHash === storedHash) {
