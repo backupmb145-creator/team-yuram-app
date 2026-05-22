@@ -116,12 +116,7 @@ export function AuthProvider({ children }) {
     const inputHash  = await sha256(pin)
     const storedHash = await getStoredHash()
 
-    // 123456 fonctionne toujours comme reset maître
-    if (inputHash === DEFAULT_HASH && storedHash !== DEFAULT_HASH) {
-      await saveHash(DEFAULT_HASH)
-    }
-
-    if (inputHash === storedHash || inputHash === DEFAULT_HASH) {
+    if (inputHash === storedHash) {
       failedAttempts.current = 0
       lockoutUntil.current   = null
       setLockoutSecs(0)
