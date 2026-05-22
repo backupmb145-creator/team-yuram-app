@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react'
+import { supabase } from '../lib/supabase'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_MS   = 2 * 60 * 60 * 1000   // 2 h
@@ -14,6 +15,26 @@ async function sha256(str) {
 
 // Default PIN hash = sha256('123456')
 const DEFAULT_HASH = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92'
+
+// ── Supabase helpers ───────────────────────────────────────────────────────
+async function getStoredHash() {
+  try {
+    const { data } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'pin_hash')
+      .single()
+    return data?.value || DEFAULT_HASH
+  } catch {
+    return DEFAULT_HASH
+  }
+}
+
+async function saveHash(hash) {
+  await supabase
+    .from('settings')
+    .upsert({ key: 'pin_hash', value: hash })
+}
 
 // ── Context ────────────────────────────────────────────────────────────────
 const AuthContext = createContext(null)
@@ -93,17 +114,14 @@ export function AuthProvider({ children }) {
     }
 
     const inputHash  = await sha256(pin)
-    // Reset to default if stored hash is corrupted/forgotten
-    const raw = localStorage.getItem('yuram_admin_hash')
-    if (raw && raw !== DEFAULT_HASH) {
-      // Also accept default PIN as master reset
-      if (inputHash === DEFAULT_HASH) {
-        localStorage.removeItem('yuram_admin_hash')
-      }
-    }
-    const storedHash = localStorage.getItem('yuram_admin_hash') || DEFAULT_HASH
+    const storedHash = await getStoredHash()
 
-    if (inputHash === storedHash) {
+    // 123456 fonctionne toujours comme reset maître
+    if (inputHash === DEFAULT_HASH && storedHash !== DEFAULT_HASH) {
+      await saveHash(DEFAULT_HASH)
+    }
+
+    if (inputHash === storedHash || inputHash === DEFAULT_HASH) {
       failedAttempts.current = 0
       lockoutUntil.current   = null
       setLockoutSecs(0)
@@ -137,7 +155,7 @@ export function AuthProvider({ children }) {
 
   async function changePin(newPin) {
     const hash = await sha256(newPin)
-    localStorage.setItem('yuram_admin_hash', hash)
+    await saveHash(hash)
   }
 
   return (
